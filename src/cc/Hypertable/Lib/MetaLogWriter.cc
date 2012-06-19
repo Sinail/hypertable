@@ -46,7 +46,7 @@ bool Writer::skip_recover_entry = false;
 
 Writer::Writer(FilesystemPtr &fs, DefinitionPtr &definition, const String &path,
                std::vector<EntityPtr> &initial_entities) :
-  m_fs(fs), m_fd(-1), m_definition(definition), m_offset(0) {
+  m_fs(fs), m_definition(definition), m_fd(-1), m_offset(0) {
 
   HT_EXPECT(Config::properties, Error::FAILED_EXPECTATION);
 
