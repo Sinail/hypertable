@@ -24,6 +24,8 @@
 
 #include <deque>
 
+#include <boost/algorithm/string.hpp>
+
 #include "Common/String.h"
 
 #include "KeySpec.h"
@@ -36,6 +38,7 @@ namespace Hypertable {
     uint32_t   num;
     uint64_t   size;
     int64_t    revision;
+    int64_t    log_dir_hash;
     bool       purge_log_dir;
     CommitLogBlockStream *block_stream;
   } CommitLogFileInfo;
@@ -56,13 +59,13 @@ namespace Hypertable {
   public:
     CommitLogBase(const String &log_dir)
       : m_log_dir(log_dir), m_latest_revision(TIMESTAMP_MIN) {
-      size_t lastslash = log_dir.find_last_of('/');
 
-      if (lastslash == log_dir.length()-1)
-        lastslash = log_dir.find_last_of('/', log_dir.length()-2);
+      boost::trim_right_if(m_log_dir, boost::is_any_of("/"));
+      
+      size_t lastslash = m_log_dir.find_last_of('/');
 
-      m_log_name = (lastslash == String::npos) ? log_dir
-                                               : log_dir.substr(lastslash+1);
+      m_log_name = (lastslash == String::npos) ? m_log_dir
+                                               : m_log_dir.substr(lastslash+1);
     }
 
     void stitch_in(CommitLogBase *other) {

@@ -91,7 +91,7 @@ CommitLog::initialize(const String &log_dir, PropertiesPtr &props,
 
   m_compressor = CompressorFactory::create_block_codec(compressor);
 
-  FileUtils::add_trailing_slash(m_log_dir);
+  boost::trim_right_if(m_log_dir, boost::is_any_of("/"));
 
   if (init_log) {
     stitch_in(init_log);
@@ -111,7 +111,7 @@ CommitLog::initialize(const String &log_dir, PropertiesPtr &props,
     }
   }
 
-  m_cur_fragment_fname = m_log_dir + m_cur_fragment_num;
+  m_cur_fragment_fname = m_log_dir + "/" + m_cur_fragment_num;
 
   try {
     m_fs->mkdirs(m_log_dir);
@@ -266,8 +266,28 @@ int CommitLog::close() {
   return Error::OK;
 }
 
+void CommitLog::remove_transfer_log(const String &log_dir) {
+  ScopedLock lock(m_mutex);
+  int64_t log_dir_hash = md5_hash(log_dir.c_str());
+  LogFragmentQueue::iterator iter = m_fragment_queue.begin();
+  while (iter != m_fragment_queue.end()) {
+    if ((*iter).log_dir_hash == log_dir_hash)
+      iter = m_fragment_queue.erase(iter);
+    else
+      iter++;
+  }
+}
 
-int CommitLog::purge(int64_t revision) {
+
+/**
+ * The remove_ok set avoids a race condition by only allowing fragments of
+ * transfer logs to be removed if the Ranges that own the transfer log
+ * are live.  There was a situation where a transfer log got stitched into
+ * the commit log, but the RS crashed before the corresponding Range was
+ * loaded.  When the RS came up again, it removed the transfer log
+ * prematurely, resulting in data loss.
+ */
+int CommitLog::purge(int64_t revision, std::set<int64_t> remove_ok) {
   ScopedLock lock(m_mutex);
   CommitLogFileInfo file_info;
   String fname;
@@ -280,9 +300,9 @@ int CommitLog::purge(int64_t revision) {
 
   while (!m_fragment_queue.empty()) {
     file_info = m_fragment_queue.front();
-    if (file_info.revision < revision) {
+    if (file_info.revision < revision && remove_ok.count(file_info.log_dir_hash) > 0) {
 
-      fname = file_info.log_dir + file_info.num;
+      fname = file_info.log_dir + "/" + file_info.num;
 
       try {
         m_fs->remove(fname);
@@ -346,6 +366,7 @@ int CommitLog::roll() {
     m_fd = -1;
 
     file_info.log_dir = m_log_dir;
+    file_info.log_dir_hash = md5_hash(m_log_dir.c_str());
     file_info.num = m_cur_fragment_num;
     file_info.size = m_cur_fragment_length;
     assert(m_latest_revision != TIMESTAMP_MIN);
@@ -365,7 +386,7 @@ int CommitLog::roll() {
     m_cur_fragment_length = 0;
 
     m_cur_fragment_num++;
-    m_cur_fragment_fname = m_log_dir + m_cur_fragment_num;
+    m_cur_fragment_fname = m_log_dir + "/" + m_cur_fragment_num;
 
   }
 

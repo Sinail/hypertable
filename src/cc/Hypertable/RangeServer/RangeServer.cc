@@ -74,6 +74,7 @@ extern "C" {
 #include "MergeScannerRange.h"
 #include "MetaLogDefinitionRangeServer.h"
 #include "MetaLogEntityRange.h"
+#include "MetaLogEntityTask.h"
 #include "RangeServer.h"
 #include "RangeStatsGatherer.h"
 #include "ScanContext.h"
@@ -524,6 +525,16 @@ void RangeServer::local_recover() {
           if ((range_entity = dynamic_cast<MetaLog::EntityRange *>(entities[i].get())) != 0)
             range_entity->load_acknowledged = true;
         }
+      }
+
+      // Populated Global::work_queue
+      {
+	ScopedLock lock(Global::mutex);
+	MetaLog::EntityTask *task_entity;
+	foreach(MetaLog::EntityPtr &entity, entities) {
+	  if ((task_entity = dynamic_cast<MetaLog::EntityTask *>(entity.get())) != 0)
+	    Global::work_queue.push_back(task_entity);
+	}
       }
 
       Global::rsml_writer = new MetaLog::Writer(Global::log_dfs, rsml_definition,
@@ -1449,8 +1460,7 @@ RangeServer::fetch_scanblock(ResponseCallbackFetchScanblock *cb,
 
 void
 RangeServer::load_range(ResponseCallback *cb, const TableIdentifier *table,
-    const RangeSpec *range_spec, const char *transfer_log_dir,
-    const RangeState *range_state, bool needs_compaction) {
+    const RangeSpec *range_spec, const RangeState *range_state, bool needs_compaction) {
   int error = Error::OK;
   TableMutatorPtr mutator;
   KeySpec key;
@@ -1487,8 +1497,7 @@ RangeServer::load_range(ResponseCallback *cb, const TableIdentifier *table,
         && !strcmp(range_spec->end_row, Key::END_ROOT_ROW);
 
       HT_INFO_OUT <<"Loading range: "<< *table <<" "<< *range_spec << " " << *range_state
-          << " transfer_log=" << transfer_log_dir << " needs_compaction="
-          << needs_compaction << HT_END;
+          << " needs_compaction=" << needs_compaction << HT_END;
 
       if (m_dropped_table_id_cache->contains(table->id)) {
         HT_WARNF("Table %s has been dropped", table->id);
@@ -1635,9 +1644,9 @@ RangeServer::load_range(ResponseCallback *cb, const TableIdentifier *table,
        * it has not been added yet and therefore no one else can find it and
        * concurrently access it.
        */
-      if (transfer_log_dir && *transfer_log_dir) {
+      if (range_state->transfer_log && *range_state->transfer_log) {
         CommitLogReaderPtr commit_log_reader =
-          new CommitLogReader(Global::log_dfs, transfer_log_dir, true);
+          new CommitLogReader(Global::log_dfs, range_state->transfer_log, true);
         if (!commit_log_reader->empty()) {
           CommitLog *log;
           if (is_root)
@@ -1653,7 +1662,7 @@ RangeServer::load_range(ResponseCallback *cb, const TableIdentifier *table,
 
           if ((error = log->link_log(commit_log_reader.get())) != Error::OK)
             HT_THROWF(error, "Unable to link transfer log (%s) into commit log(%s)",
-                      transfer_log_dir, log->get_log_dir().c_str());
+                      range_state->transfer_log, log->get_log_dir().c_str());
 
           // transfer the in-memory log fragments
           log->stitch_in(commit_log_reader.get());

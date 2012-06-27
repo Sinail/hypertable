@@ -72,7 +72,7 @@ CommitLogReader::CommitLogReader(FilesystemPtr &fs, const String &log_dir, bool 
   if (get_bool("Hypertable.CommitLog.SkipErrors"))
     CommitLogBlockStream::ms_assert_on_error = false;
 
-  load_fragments(log_dir, mark_for_deletion);
+  load_fragments(m_log_dir, mark_for_deletion);
   reset();
 }
 
@@ -119,6 +119,7 @@ CommitLogReader::next_raw_block(CommitLogBlockInfo *infop,
   if (header->check_magic(CommitLog::MAGIC_LINK)) {
     assert(header->get_compression_type() == BlockCompressionCodec::NONE);
     String log_dir = (const char *)(infop->block_ptr + header->length());
+    boost::trim_right_if(log_dir, boost::is_any_of("/"));
     load_fragments(log_dir, true);
     m_linked_logs.insert(md5_hash(log_dir.c_str()));
     if (header->get_revision() > m_latest_revision)
@@ -190,8 +191,6 @@ void CommitLogReader::load_fragments(String log_dir, bool mark_for_deletion) {
   CommitLogFileInfo file_info;
   bool added_fragments = false;
 
-  FileUtils::add_trailing_slash(log_dir);
-
   try {
     m_fs->readdir(log_dir, listing);
   }
@@ -223,10 +222,11 @@ void CommitLogReader::load_fragments(String log_dir, bool mark_for_deletion) {
     else {
       file_info.num = (uint32_t)num;
       file_info.log_dir = log_dir;
+      file_info.log_dir_hash = md5_hash(log_dir.c_str());
       file_info.purge_log_dir = false;
       file_info.revision = 0;
       file_info.block_stream = 0;
-      file_info.size = m_fs->length(log_dir + listing[i]);
+      file_info.size = m_fs->length(log_dir + "/" + listing[i]);
       if (file_info.size > 0) {
         m_fragment_queue.push_back(file_info);
         added_fragments = true;
@@ -237,7 +237,7 @@ void CommitLogReader::load_fragments(String log_dir, bool mark_for_deletion) {
   // set the "purge log dir" bit on the most recent fragment
   if (added_fragments) {
     if (mark_for_deletion) {
-      HT_ASSERT(!boost::ends_with(m_fragment_queue.back().log_dir, "user/"));
+      HT_ASSERT(!boost::ends_with(m_fragment_queue.back().log_dir, "user"));
       m_fragment_queue.back().purge_log_dir = true;
     }
   }

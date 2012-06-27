@@ -99,6 +99,7 @@ namespace Hypertable {
       bool     relinquish;
       bool     needs_major_compaction;
       bool     needs_split;
+      int64_t  log_hash;
     };
 
     typedef std::map<String, AccessGroup *> AccessGroupMap;
@@ -365,6 +366,7 @@ namespace Hypertable {
     bool             m_removed_from_working_set;
     int64_t          m_maintenance_generation;
     LoadMetricsRange m_load_metrics;
+    int64_t          m_log_hash;
   };
 
   typedef intrusive_ptr<Range> RangePtr;
